@@ -27,7 +27,7 @@ pub enum AccessorParserErrorKind {
 
 #[derive(Clone, Copy, Debug)]
 pub enum InvalidUnicodeError {
-    ExpectedOpeningBracket,
+    MissingOpeningBracket,
     MissingClosingBracket,
     InvalidCodeLength,
     InvalidHexadecimal,

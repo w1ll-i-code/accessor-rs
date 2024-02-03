@@ -210,7 +210,7 @@ fn take_unicode(input: LocatedSpan<&str>) -> PResult<char> {
     let Ok((input, _)) = tag::<_, _, NomError>("{")(input) else {
         let span_start = input.get_utf8_column() - 1;
         return Err(Err::Failure(AccessorParserError{
-            kind: AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::ExpectedOpeningBracket),
+            kind: AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::MissingOpeningBracket),
             span: AccessorParserErrorSpan {
                 start: span_start,
                 end: span_start + 1,
@@ -235,7 +235,7 @@ fn take_unicode(input: LocatedSpan<&str>) -> PResult<char> {
     let code_point_error_span = {
         let span_start = unicode_code_point.get_utf8_column() - 1;
         let span_length = unicode_code_point.fragment().chars().count();
-        let span_end = span_start + span_length - 1;
+        let span_end = span_start + span_length;
 
         AccessorParserErrorSpan {
             start: span_start,
@@ -284,9 +284,9 @@ fn take_char(input: LocatedSpan<&str>) -> PResult<char> {
 
 #[cfg(test)]
 mod tests {
-    use crate::error::{AccessorParserError, AccessorParserErrorKind, AccessorParserErrorSpan};
+    use crate::error::{AccessorParserError, AccessorParserErrorKind, AccessorParserErrorSpan, InvalidUnicodeError};
 
-    use super::take_char;
+    use super::{take_char, take_escaped_char, take_unicode};
 
     #[test]
     fn should_take_single_char() {
@@ -334,6 +334,84 @@ mod tests {
                     end: 2,
                 },
             }) => {},
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_parse_correct_unicode() {
+        let (rest, ch) = take_unicode("{61}bcd".into()).unwrap();
+        assert_eq!('a', ch);
+        assert_eq!("bcd", *rest.fragment());
+        assert_eq!(4, rest.get_utf8_column() - 1);
+    }
+
+    #[test]
+    fn should_fail_to_parse_unicode_on_to_short_code() {
+        let err = take_unicode("{6}bcd".into()).unwrap_err();
+        match err {
+            nom::Err::Failure(AccessorParserError {
+                kind: AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::InvalidCodeLength),
+                span: AccessorParserErrorSpan { start: 1, end: 2 },
+            }) => {}
+            err => unreachable!("{:?}", err),
+        }
+
+        let err = take_unicode("{123456789}bcd".into()).unwrap_err();
+        match err {
+            nom::Err::Failure(AccessorParserError {
+                kind: AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::InvalidCodeLength),
+                span: AccessorParserErrorSpan { start: 1, end: 10 },
+            }) => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_fail_to_parse_unicode_on_missing_opening_bracket() {
+        let err = take_unicode("6}bcd".into()).unwrap_err();
+        match err {
+            nom::Err::Failure(AccessorParserError {
+                kind: AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::MissingOpeningBracket),
+                span: AccessorParserErrorSpan { start: 0, end: 1 },
+            }) => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+
+    #[test]
+    fn should_fail_to_parse_unicode_on_missing_closing_bracket() {
+        let err = take_unicode("{6bcd".into()).unwrap_err();
+        match err {
+            nom::Err::Failure(AccessorParserError {
+                kind: AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::MissingClosingBracket),
+                span: AccessorParserErrorSpan { start: 1, end: 5 },
+            }) => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_fail_to_parse_unicode_on_invalid_hex() {
+        let err = take_unicode("{xx}".into()).unwrap_err();
+        match err {
+            nom::Err::Failure(AccessorParserError {
+                kind: AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::InvalidHexadecimal),
+                span: AccessorParserErrorSpan { start: 1, end: 3 },
+            }) => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_fail_to_parse_unicode_on_invalid_code_point() {
+        let err = take_unicode("{10ffffff}".into()).unwrap_err();
+        match err {
+            nom::Err::Failure(AccessorParserError {
+                kind: AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::InvalidCodePoint),
+                span: AccessorParserErrorSpan { start: 1, end: 9 },
+            }) => {}
             err => unreachable!("{:?}", err),
         }
     }
