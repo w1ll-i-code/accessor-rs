@@ -281,3 +281,60 @@ fn take_char(input: LocatedSpan<&str>) -> PResult<char> {
 
     Ok((rest, ch))
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::error::{AccessorParserError, AccessorParserErrorKind, AccessorParserErrorSpan};
+
+    use super::take_char;
+
+    #[test]
+    fn should_take_single_char() {
+        let (rest, ch) = take_char("abcd".into()).unwrap();
+        assert_eq!('a', ch);
+        assert_eq!("bcd", *rest.fragment());
+        assert_eq!(1, rest.get_utf8_column() - 1);
+    }
+
+    #[test]
+    fn should_fail_to_take_reserved_char() {
+        let err = take_char(".bcd".into()).unwrap_err();
+        match err {
+            nom::Err::Failure(AccessorParserError {
+                kind: AccessorParserErrorKind::InvalidCharacter('.'),
+                span: AccessorParserErrorSpan {
+                    start: 0,
+                    end: 1,
+                },
+            }) => {},
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_take_multiple_chars() {
+        let (input, ch1) = take_char("abcd".into()).unwrap();
+        let (rest, ch2) = take_char(input).unwrap();
+        assert_eq!('a', ch1);
+        assert_eq!('b', ch2);
+        assert_eq!("cd", *rest.fragment());
+        assert_eq!(2, rest.get_utf8_column() - 1);
+    }
+
+    #[test]
+    fn should_take_only_first_chars() {
+        let (input, ch1) = take_char("a.cd".into()).unwrap();
+        let err = take_char(input).unwrap_err();
+        assert_eq!('a', ch1);
+        match err {
+            nom::Err::Failure(AccessorParserError {
+                kind: AccessorParserErrorKind::InvalidCharacter('.'),
+                span: AccessorParserErrorSpan {
+                    start: 1,
+                    end: 2,
+                },
+            }) => {},
+            err => unreachable!("{:?}", err),
+        }
+    }
+}
