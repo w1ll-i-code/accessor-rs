@@ -280,12 +280,14 @@ fn take_char(input: LocatedSpan<&str>) -> PResult<char> {
 
 #[cfg(test)]
 mod tests {
+    use nom::multi::many0;
+
     use crate::{
         error::{
             AccessorParserError, AccessorParserErrorKind, AccessorParserErrorSpan,
             InvalidUnicodeError,
         },
-        parser::AccessorKey,
+        parser::{take_key, AccessorKey},
     };
 
     use super::{
@@ -546,6 +548,36 @@ mod tests {
     }
 
     #[test]
+    fn should_fail_to_take_string_key_without_prefix_and_trailing_key() {
+        let err = take_string_key("key.key".into()).unwrap_err();
+        match err {
+            nom::Err::Error(AccessorParserError {
+                kind: AccessorParserErrorKind::InvalidAccessor,
+                span: AccessorParserErrorSpan { start: 0, end: 3 },
+            }) => {}
+            err => unreachable!("{:?}", err),
+        }
+
+        let err = take_string_key("key[1234]".into()).unwrap_err();
+        match err {
+            nom::Err::Error(AccessorParserError {
+                kind: AccessorParserErrorKind::InvalidAccessor,
+                span: AccessorParserErrorSpan { start: 0, end: 3 },
+            }) => {}
+            err => unreachable!("{:?}", err),
+        }
+
+        let err = take_string_key("key} ---".into()).unwrap_err();
+        match err {
+            nom::Err::Error(AccessorParserError {
+                kind: AccessorParserErrorKind::InvalidAccessor,
+                span: AccessorParserErrorSpan { start: 0, end: 3 },
+            }) => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
     fn should_take_numeric_key() {
         let (rest, key) = take_numeric_key("[1234]".into()).unwrap();
         assert_eq!("", *rest.fragment());
@@ -599,6 +631,27 @@ mod tests {
                 kind: AccessorParserErrorKind::NotANumber,
                 span: AccessorParserErrorSpan { start: 1, end: 4 },
             }) => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_take_multiple_keys() {
+        let (rest, key) = many0(take_key)(".key1[1234].key2".into()).unwrap();
+        assert_eq!("", *rest.fragment());
+        assert_eq!(16, rest.get_utf8_column() - 1);
+        match key.as_slice() {
+            [AccessorKey::String(key1), AccessorKey::Numeric(1234), AccessorKey::String(key2)]
+                if key1.as_ref() == "key1" && key2.as_ref() == "key2" => {}
+            err => unreachable!("{:?}", err),
+        }
+  
+        let (rest, key) = many0(take_key)(".key\\u{31}[1234].key\\u{32}".into()).unwrap();
+        assert_eq!("", *rest.fragment());
+        assert_eq!(26, rest.get_utf8_column() - 1);
+        match key.as_slice() {
+            [AccessorKey::String(key1), AccessorKey::Numeric(1234), AccessorKey::String(key2)]
+                if key1.as_ref() == "key1" && key2.as_ref() == "key2" => {}
             err => unreachable!("{:?}", err),
         }
     }
