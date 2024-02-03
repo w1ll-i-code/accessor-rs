@@ -415,4 +415,34 @@ mod tests {
             err => unreachable!("{:?}", err),
         }
     }
+
+    #[test]
+    fn should_parse_escape_characters() {
+        let (rest, ch) = take_escaped_char("nopq".into()).unwrap();
+        assert_eq!('\n', ch);
+        assert_eq!("opq", *rest.fragment());
+        assert_eq!(1, rest.get_utf8_column() - 1);
+
+        let (rest, ch) = take_escaped_char(".opq".into()).unwrap();
+        assert_eq!('.', ch);
+        assert_eq!("opq", *rest.fragment());
+        assert_eq!(1, rest.get_utf8_column() - 1);
+
+        let (rest, ch) = take_escaped_char("u{61}bcd".into()).unwrap();
+        assert_eq!('a', ch);
+        assert_eq!("bcd", *rest.fragment());
+        assert_eq!(5, rest.get_utf8_column() - 1);
+    }
+
+    #[test]
+    fn should_fail_to_parse_unknown_escape_sequence() {
+        let err = take_escaped_char("abcd".into()).unwrap_err();
+        match err {
+            nom::Err::Failure(AccessorParserError {
+                kind: AccessorParserErrorKind::InvalidEscapeCharacter('a'),
+                span: AccessorParserErrorSpan { start: 0, end: 1 },
+            }) => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
 }
