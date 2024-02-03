@@ -288,6 +288,7 @@ mod tests {
             InvalidUnicodeError,
         },
         parser::{take_key, AccessorKey},
+        take_accessor,
     };
 
     use super::{
@@ -645,13 +646,68 @@ mod tests {
                 if key1.as_ref() == "key1" && key2.as_ref() == "key2" => {}
             err => unreachable!("{:?}", err),
         }
-  
+
         let (rest, key) = many0(take_key)(".key\\u{31}[1234].key\\u{32}".into()).unwrap();
         assert_eq!("", *rest.fragment());
         assert_eq!(26, rest.get_utf8_column() - 1);
         match key.as_slice() {
             [AccessorKey::String(key1), AccessorKey::Numeric(1234), AccessorKey::String(key2)]
                 if key1.as_ref() == "key1" && key2.as_ref() == "key2" => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_not_return_accessor_without_brackets() {
+        let (rest, accessor) = take_accessor("key1[1234].key2".into()).unwrap();
+        assert_eq!("key1[1234].key2", *rest.fragment());
+        assert_eq!(0, rest.get_utf8_column() - 1);
+        match accessor {
+            None => {}
+            Some(accessor) => unreachable!("{:?}", accessor),
+        }
+    }
+
+    #[test]
+    fn should_return_accessor_with_root() {
+        let (rest, accessor) = take_accessor("${key}".into()).unwrap();
+        assert_eq!("", *rest.fragment());
+        assert_eq!(6, rest.get_utf8_column() - 1);
+        match accessor {
+            Some(accessor) => {
+                assert_eq!(1, accessor.keys.len());
+                match accessor.keys.as_ref() {
+                    [AccessorKey::String(key)] if key.as_ref() == "key" => {}
+                    err => unreachable!("{:?}", err),
+                }
+            }
+            None => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn should_return_accessor_with_multiple_keys() {
+        let (rest, accessor) = take_accessor("${key1[1234].key2}".into()).unwrap();
+        assert_eq!("", *rest.fragment());
+        assert_eq!(18, rest.get_utf8_column() - 1);
+        match accessor {
+            Some(accessor) => match accessor.keys.as_ref() {
+                [AccessorKey::String(key1), AccessorKey::Numeric(ke1234), AccessorKey::String(key2)]
+                    if key1.as_ref() == "key1" && key2.as_ref() == "key2" => {}
+                err => unreachable!("{:?}", err),
+            },
+            None => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn should_fail_to_create_accessor_on_missing_closing_bracket() {
+        let err = take_accessor("${key1[1234].key2".into()).unwrap_err();
+        match err {
+            nom::Err::Failure(AccessorParserError {
+                kind: AccessorParserErrorKind::MissingClosingBracket,
+                span: AccessorParserErrorSpan { start: 0, end: 2 },
+            }) => {}
             err => unreachable!("{:?}", err),
         }
     }
