@@ -162,10 +162,6 @@ fn is_separator(c: char) -> bool {
     c == '.' || c == '[' || c == '}'
 }
 
-fn take_string<'input>(input: LocatedSpan<&'input str>) -> PResult<'input, String> {
-    take_string_until(|c| c == '$')(input)
-}
-
 fn take_string_until<'input, Cond: Fn(char) -> bool>(
     cond: Cond,
 ) -> impl Fn(LocatedSpan<&'input str>) -> PResult<'input, String> {
@@ -180,7 +176,7 @@ fn take_string_until<'input, Cond: Fn(char) -> bool>(
                 return Ok((input, buf));
             }
 
-            let (rest, ch) = alt((preceded(tag("\\"), take_escaped_char), take_char))(input)?;
+            let (rest, ch) = alt((take_escaped_char, take_char))(input)?;
 
             input = rest;
             buf.push(ch);
@@ -189,6 +185,7 @@ fn take_string_until<'input, Cond: Fn(char) -> bool>(
 }
 
 fn take_escaped_char<'input>(input: LocatedSpan<&'input str>) -> PResult<'input, char> {
+    let (input, first) = tag("\\")(input)?;
     let (rest, ch) = anychar(input)?;
     match ch {
         '\\' | '{' | '}' | '[' | ']' | '.' | '$' => Ok((rest, ch)),
@@ -196,13 +193,17 @@ fn take_escaped_char<'input>(input: LocatedSpan<&'input str>) -> PResult<'input,
         't' => Ok((rest, '\t')),
         'r' => Ok((rest, '\r')),
         'u' => take_unicode(rest),
-        _ => Err(Err::Failure(AccessorParserError {
-            kind: AccessorParserErrorKind::InvalidEscapeCharacter(ch),
-            span: AccessorParserErrorSpan {
-                start: rest.get_utf8_column() - 1,
-                end: rest.get_utf8_column() - 1 + 1,
-            },
-        })),
+        _ => {
+            let span_start = first.get_utf8_column() - 1;
+            let span_end = rest.get_utf8_column() - 1;
+            Err(Err::Failure(AccessorParserError {
+                kind: AccessorParserErrorKind::InvalidEscapeCharacter(ch),
+                span: AccessorParserErrorSpan {
+                    start: span_start,
+                    end: span_end,
+                },
+            }))
+        }
     }
 }
 
@@ -284,9 +285,11 @@ fn take_char(input: LocatedSpan<&str>) -> PResult<char> {
 
 #[cfg(test)]
 mod tests {
-    use crate::error::{AccessorParserError, AccessorParserErrorKind, AccessorParserErrorSpan, InvalidUnicodeError};
+    use crate::error::{
+        AccessorParserError, AccessorParserErrorKind, AccessorParserErrorSpan, InvalidUnicodeError,
+    };
 
-    use super::{take_char, take_escaped_char, take_unicode};
+    use super::{take_char, take_escaped_char, take_string_until, take_unicode};
 
     #[test]
     fn should_take_single_char() {
@@ -302,11 +305,8 @@ mod tests {
         match err {
             nom::Err::Failure(AccessorParserError {
                 kind: AccessorParserErrorKind::InvalidCharacter('.'),
-                span: AccessorParserErrorSpan {
-                    start: 0,
-                    end: 1,
-                },
-            }) => {},
+                span: AccessorParserErrorSpan { start: 0, end: 1 },
+            }) => {}
             err => unreachable!("{:?}", err),
         }
     }
@@ -329,11 +329,8 @@ mod tests {
         match err {
             nom::Err::Failure(AccessorParserError {
                 kind: AccessorParserErrorKind::InvalidCharacter('.'),
-                span: AccessorParserErrorSpan {
-                    start: 1,
-                    end: 2,
-                },
-            }) => {},
+                span: AccessorParserErrorSpan { start: 1, end: 2 },
+            }) => {}
             err => unreachable!("{:?}", err),
         }
     }
@@ -351,7 +348,8 @@ mod tests {
         let err = take_unicode("{6}bcd".into()).unwrap_err();
         match err {
             nom::Err::Failure(AccessorParserError {
-                kind: AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::InvalidCodeLength),
+                kind:
+                    AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::InvalidCodeLength),
                 span: AccessorParserErrorSpan { start: 1, end: 2 },
             }) => {}
             err => unreachable!("{:?}", err),
@@ -360,7 +358,8 @@ mod tests {
         let err = take_unicode("{123456789}bcd".into()).unwrap_err();
         match err {
             nom::Err::Failure(AccessorParserError {
-                kind: AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::InvalidCodeLength),
+                kind:
+                    AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::InvalidCodeLength),
                 span: AccessorParserErrorSpan { start: 1, end: 10 },
             }) => {}
             err => unreachable!("{:?}", err),
@@ -372,20 +371,21 @@ mod tests {
         let err = take_unicode("6}bcd".into()).unwrap_err();
         match err {
             nom::Err::Failure(AccessorParserError {
-                kind: AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::MissingOpeningBracket),
+                kind:
+                    AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::MissingOpeningBracket),
                 span: AccessorParserErrorSpan { start: 0, end: 1 },
             }) => {}
             err => unreachable!("{:?}", err),
         }
     }
 
-
     #[test]
     fn should_fail_to_parse_unicode_on_missing_closing_bracket() {
         let err = take_unicode("{6bcd".into()).unwrap_err();
         match err {
             nom::Err::Failure(AccessorParserError {
-                kind: AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::MissingClosingBracket),
+                kind:
+                    AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::MissingClosingBracket),
                 span: AccessorParserErrorSpan { start: 1, end: 5 },
             }) => {}
             err => unreachable!("{:?}", err),
@@ -397,7 +397,8 @@ mod tests {
         let err = take_unicode("{xx}".into()).unwrap_err();
         match err {
             nom::Err::Failure(AccessorParserError {
-                kind: AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::InvalidHexadecimal),
+                kind:
+                    AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::InvalidHexadecimal),
                 span: AccessorParserErrorSpan { start: 1, end: 3 },
             }) => {}
             err => unreachable!("{:?}", err),
@@ -418,29 +419,69 @@ mod tests {
 
     #[test]
     fn should_parse_escape_characters() {
-        let (rest, ch) = take_escaped_char("nopq".into()).unwrap();
+        let (rest, ch) = take_escaped_char("\\nopq".into()).unwrap();
         assert_eq!('\n', ch);
         assert_eq!("opq", *rest.fragment());
-        assert_eq!(1, rest.get_utf8_column() - 1);
+        assert_eq!(2, rest.get_utf8_column() - 1);
 
-        let (rest, ch) = take_escaped_char(".opq".into()).unwrap();
+        let (rest, ch) = take_escaped_char("\\.opq".into()).unwrap();
         assert_eq!('.', ch);
         assert_eq!("opq", *rest.fragment());
-        assert_eq!(1, rest.get_utf8_column() - 1);
+        assert_eq!(2, rest.get_utf8_column() - 1);
 
-        let (rest, ch) = take_escaped_char("u{61}bcd".into()).unwrap();
+        let (rest, ch) = take_escaped_char("\\u{61}bcd".into()).unwrap();
         assert_eq!('a', ch);
         assert_eq!("bcd", *rest.fragment());
-        assert_eq!(5, rest.get_utf8_column() - 1);
+        assert_eq!(6, rest.get_utf8_column() - 1);
     }
 
     #[test]
     fn should_fail_to_parse_unknown_escape_sequence() {
-        let err = take_escaped_char("abcd".into()).unwrap_err();
+        let err = take_escaped_char("\\abcd".into()).unwrap_err();
         match err {
             nom::Err::Failure(AccessorParserError {
                 kind: AccessorParserErrorKind::InvalidEscapeCharacter('a'),
-                span: AccessorParserErrorSpan { start: 0, end: 1 },
+                span: AccessorParserErrorSpan { start: 0, end: 2 },
+            }) => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_take_string() {
+        let (rest, string) = take_string_until(|_| false)("\\u{61}bcd\\\\".into()).unwrap();
+        assert_eq!("abcd\\", string.as_str());
+        assert_eq!("", *rest.fragment());
+        assert_eq!(11, rest.get_utf8_column() - 1);
+    }
+
+    #[test]
+    fn should_take_string_until() {
+        let (rest, string) = take_string_until(|c| c == 'c')("\\u{61}bcd\\\\".into()).unwrap();
+        assert_eq!("ab", string.as_str());
+        assert_eq!("cd\\\\", *rest.fragment());
+        assert_eq!(7, rest.get_utf8_column() - 1);
+    }
+
+    #[test]
+    fn should_fail_to_take_string_on_reserved_character() {
+        let err = take_string_until(|_| false)("ab.c".into()).unwrap_err();
+        match err {
+            nom::Err::Failure(AccessorParserError {
+                kind: AccessorParserErrorKind::InvalidCharacter('.'),
+                span: AccessorParserErrorSpan { start: 2, end: 3 },
+            }) => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_fail_to_take_string_on_invalid_escape_char() {
+        let err = take_string_until(|_| false)("ab\\c".into()).unwrap_err();
+        match err {
+            nom::Err::Failure(AccessorParserError {
+                kind: AccessorParserErrorKind::InvalidEscapeCharacter('c'),
+                span: AccessorParserErrorSpan { start: 2, end: 4 },
             }) => {}
             err => unreachable!("{:?}", err),
         }

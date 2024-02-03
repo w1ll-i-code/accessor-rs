@@ -22,7 +22,7 @@ pub enum AccessorParserErrorKind {
     MissingClosingBracket,
     NotANumber,
     NotAnAccessor,
-    Unknown(ErrorKind)
+    Unknown(ErrorKind),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -41,7 +41,7 @@ impl<'input> ParseError<LocatedSpan<&'input str>> for AccessorParserError {
             kind: AccessorParserErrorKind::Unknown(kind),
             span: AccessorParserErrorSpan {
                 start: span_start,
-                end: span_start + 1
+                end: span_start + 1,
             },
         }
     }

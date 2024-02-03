@@ -1,7 +1,7 @@
-
-
 mod error;
 mod parser;
+
+pub use parser::{take_accessor, Accessor};
 
 #[cfg(test)]
 mod test {
