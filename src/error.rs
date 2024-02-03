@@ -2,7 +2,7 @@ use nom::error::{ErrorKind, ParseError};
 use nom_locate::LocatedSpan;
 
 #[derive(Clone, Copy, Debug)]
-pub struct AccessorParserErrorSpan {
+pub struct AccessorParserSpan {
     pub(crate) start: usize,
     pub(crate) end: usize,
 }
@@ -10,7 +10,7 @@ pub struct AccessorParserErrorSpan {
 #[derive(Clone, Copy, Debug)]
 pub struct AccessorParserError {
     pub(crate) kind: AccessorParserErrorKind,
-    pub(crate) span: AccessorParserErrorSpan,
+    pub(crate) span: AccessorParserSpan,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -39,7 +39,7 @@ impl<'input> ParseError<LocatedSpan<&'input str>> for AccessorParserError {
         let span_start = input.get_utf8_column();
         AccessorParserError {
             kind: AccessorParserErrorKind::Unknown(kind),
-            span: AccessorParserErrorSpan {
+            span: AccessorParserSpan {
                 start: span_start,
                 end: span_start + 1,
             },
