@@ -3,7 +3,7 @@ use nom::{
     bytes::complete::{tag, take_until},
     character::complete::anychar,
     error::Error,
-    sequence::{preceded, terminated},
+    sequence::terminated,
     Err,
 };
 use nom_locate::LocatedSpan;
@@ -45,8 +45,6 @@ pub fn take_accessor<'input>(input: LocatedSpan<&'input str>) -> PResult<'input,
         return Ok((input, None));
     };
 
-    dbg!(&opening);
-
     let (input, root) = take_string_until(is_separator)(input)?;
 
     let mut keys = vec![AccessorKey::from(root)];
@@ -62,9 +60,6 @@ pub fn take_accessor<'input>(input: LocatedSpan<&'input str>) -> PResult<'input,
             Err(err) => break err,
         }
     };
-
-    dbg!(&keys);
-    dbg!(&input);
 
     let Ok((input, _)) = tag::<_, _, NomError>("}")(input) else {
         let span_start = opening.get_utf8_column() - 1;
@@ -86,10 +81,10 @@ pub fn take_accessor<'input>(input: LocatedSpan<&'input str>) -> PResult<'input,
 }
 
 fn take_key<'input>(input: LocatedSpan<&'input str>) -> PResult<'input, AccessorKey> {
-    alt((take_string_key, take_index_key))(input)
+    alt((take_string_key, take_numeric_key))(input)
 }
 
-fn take_index_key<'input>(input: LocatedSpan<&'input str>) -> PResult<'input, AccessorKey> {
+fn take_numeric_key<'input>(input: LocatedSpan<&'input str>) -> PResult<'input, AccessorKey> {
     let Ok((input, opening_bracket)) = tag::<_, _, NomError>("[")(input) else {
         let span_start = input.get_utf8_column() - 1;
         let next_separator = find_next_separator(input);
@@ -116,7 +111,7 @@ fn take_index_key<'input>(input: LocatedSpan<&'input str>) -> PResult<'input, Ac
     };
 
     let Some(index): Option<usize> = index.parse().ok() else {
-        let span_start = input.get_utf8_column() - 1;
+        let span_start = index.get_utf8_column() - 1;
         let span_end = span_start + index.chars().count();
         return Err(Err::Failure(AccessorParserError {
             kind: AccessorParserErrorKind::NotANumber,
@@ -293,7 +288,10 @@ mod tests {
         parser::AccessorKey,
     };
 
-    use super::{take_char, take_escaped_char, take_string_key, take_string_until, take_unicode};
+    use super::{
+        take_char, take_escaped_char, take_numeric_key, take_string_key, take_string_until,
+        take_unicode,
+    };
 
     #[test]
     fn should_take_single_char() {
@@ -542,6 +540,64 @@ mod tests {
             nom::Err::Error(AccessorParserError {
                 kind: AccessorParserErrorKind::InvalidAccessor,
                 span: AccessorParserErrorSpan { start: 0, end: 3 },
+            }) => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_take_numeric_key() {
+        let (rest, key) = take_numeric_key("[1234]".into()).unwrap();
+        assert_eq!("", *rest.fragment());
+        assert_eq!(6, rest.get_utf8_column() - 1);
+        match key {
+            AccessorKey::Numeric(1234) => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_take_first_numeric_key() {
+        let (rest, key) = take_numeric_key("[1234].key".into()).unwrap();
+        assert_eq!(".key", *rest.fragment());
+        assert_eq!(6, rest.get_utf8_column() - 1);
+        match key {
+            AccessorKey::Numeric(1234) => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_fail_to_take_numeric_key_on_missing_opening_bracket() {
+        let err = take_numeric_key("1234]".into()).unwrap_err();
+        match err {
+            nom::Err::Error(AccessorParserError {
+                kind: AccessorParserErrorKind::InvalidAccessor,
+                span: AccessorParserErrorSpan { start: 0, end: 5 },
+            }) => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_fail_to_take_numeric_key_on_missing_closing_bracket() {
+        let err = take_numeric_key("[1234".into()).unwrap_err();
+        match err {
+            nom::Err::Failure(AccessorParserError {
+                kind: AccessorParserErrorKind::MissingClosingBracket,
+                span: AccessorParserErrorSpan { start: 0, end: 1 },
+            }) => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_fail_to_take_numeric_key_on_not_a_number() {
+        let err = take_numeric_key("[abc]".into()).unwrap_err();
+        match err {
+            nom::Err::Failure(AccessorParserError {
+                kind: AccessorParserErrorKind::NotANumber,
+                span: AccessorParserErrorSpan { start: 1, end: 4 },
             }) => {}
             err => unreachable!("{:?}", err),
         }
