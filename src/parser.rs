@@ -285,11 +285,15 @@ fn take_char(input: LocatedSpan<&str>) -> PResult<char> {
 
 #[cfg(test)]
 mod tests {
-    use crate::error::{
-        AccessorParserError, AccessorParserErrorKind, AccessorParserErrorSpan, InvalidUnicodeError,
+    use crate::{
+        error::{
+            AccessorParserError, AccessorParserErrorKind, AccessorParserErrorSpan,
+            InvalidUnicodeError,
+        },
+        parser::AccessorKey,
     };
 
-    use super::{take_char, take_escaped_char, take_string_until, take_unicode};
+    use super::{take_char, take_escaped_char, take_string_key, take_string_until, take_unicode};
 
     #[test]
     fn should_take_single_char() {
@@ -482,6 +486,62 @@ mod tests {
             nom::Err::Failure(AccessorParserError {
                 kind: AccessorParserErrorKind::InvalidEscapeCharacter('c'),
                 span: AccessorParserErrorSpan { start: 2, end: 4 },
+            }) => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_take_string_key() {
+        let (rest, key) = take_string_key(".key".into()).unwrap();
+        assert_eq!("", *rest.fragment());
+        assert_eq!(4, rest.get_utf8_column() - 1);
+        match key {
+            AccessorKey::String(s) if s.as_ref() == "key" => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_take_first_string_key() {
+        let (rest, key) = take_string_key(".key.key".into()).unwrap();
+        assert_eq!(".key", *rest.fragment());
+        assert_eq!(4, rest.get_utf8_column() - 1);
+        match key {
+            AccessorKey::String(s) if s.as_ref() == "key" => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_take_first_key() {
+        let (rest, key) = take_string_key(".key[1234]".into()).unwrap();
+        assert_eq!("[1234]", *rest.fragment());
+        assert_eq!(4, rest.get_utf8_column() - 1);
+        match key {
+            AccessorKey::String(s) if s.as_ref() == "key" => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_take_last_string_key() {
+        let (rest, key) = take_string_key(".key}".into()).unwrap();
+        assert_eq!("}", *rest.fragment());
+        assert_eq!(4, rest.get_utf8_column() - 1);
+        match key {
+            AccessorKey::String(s) if s.as_ref() == "key" => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_fail_to_take_string_key_without_prefix() {
+        let err = take_string_key("key".into()).unwrap_err();
+        match err {
+            nom::Err::Error(AccessorParserError {
+                kind: AccessorParserErrorKind::InvalidAccessor,
+                span: AccessorParserErrorSpan { start: 0, end: 3 },
             }) => {}
             err => unreachable!("{:?}", err),
         }
