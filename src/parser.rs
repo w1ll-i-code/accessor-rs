@@ -196,7 +196,8 @@ fn take_string_with_escape_until<'token, Cond: Fn(char) -> bool + Copy + 'token>
                 return Ok((input, buf));
             };
 
-            let (rest, ch) = alt((take_escaped_char(reserved_token), take_char(reserved_token)))(input)?;
+            let (rest, ch) =
+                alt((take_escaped_char(reserved_token), take_char(reserved_token)))(input)?;
 
             input = rest;
             buf.push(ch);
@@ -292,7 +293,9 @@ fn take_unicode(input: LocatedSpan<&str>) -> PResult<char> {
     Ok((input, ch))
 }
 
-fn take_char<'token>(reserved_token: &'token [char]) -> impl Fn(LocatedSpan<&str>) -> PResult<char> + 'token {
+fn take_char<'token>(
+    reserved_token: &'token [char],
+) -> impl Fn(LocatedSpan<&str>) -> PResult<char> + 'token {
     move |input| {
         let (rest, ch) = anychar(input)?;
         if reserved_token.contains(&ch) {
@@ -688,12 +691,12 @@ mod tests {
 
     #[test]
     fn should_take_multiple_keys() {
-        let (rest, key) = many0(take_key)(".key1[1234].key2".into()).unwrap();
+        let (rest, key) = many0(take_key)(".key1[1234].\"key2.same\"".into()).unwrap();
         assert_eq!("", *rest.fragment());
-        assert_eq!(16, rest.get_utf8_column() - 1);
+        assert_eq!(23, rest.get_utf8_column() - 1);
         match key.as_slice() {
             [AccessorKey::String(key1), AccessorKey::Numeric(1234), AccessorKey::String(key2)]
-                if key1.as_ref() == "key1" && key2.as_ref() == "key2" => {}
+                if key1.as_ref() == "key1" && key2.as_ref() == "key2.same" => {}
             err => unreachable!("{:?}", err),
         }
 
