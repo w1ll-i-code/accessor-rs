@@ -42,7 +42,6 @@ pub struct SpannedAccessorKey {
     span: AccessorParserSpan,
 }
 
-
 impl SpannedAccessorKey {
     pub fn key(&self) -> &AccessorKey {
         &self.key

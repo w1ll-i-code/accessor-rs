@@ -1,5 +1,11 @@
 use nom::{
-    branch::alt, bytes::complete::{tag, take_until}, character::complete::anychar, combinator::verify, error::Error, sequence::terminated, Err
+    branch::alt,
+    bytes::complete::{tag, take_until},
+    character::complete::anychar,
+    combinator::verify,
+    error::Error,
+    sequence::terminated,
+    Err,
 };
 use nom_locate::LocatedSpan;
 
@@ -9,13 +15,12 @@ use crate::{
 };
 
 const RESERVED_TOKEN: &[char] = &['\\', '{', '}', '[', ']', '.', '$', '"'];
+const RESERVED_RAW_LITERAL: &[char] = &['\\', '"'];
 
 type PResult<'input, Output> = Result<(LocatedSpan<&'input str>, Output), Err<AccessorParserError>>;
 type NomError<'input> = Error<LocatedSpan<&'input str>>;
 
-pub fn take_spanned_accessor<'input>(
-    input: LocatedSpan<&'input str>,
-) -> PResult<'input, Option<SpannedAccessor>> {
+pub fn take_spanned_accessor(input: LocatedSpan<&str>) -> PResult<Option<SpannedAccessor>> {
     let fn_input = input;
     let Ok((input, opening)) = tag::<_, _, NomError>("${")(input) else {
         return Ok((input, None));
@@ -47,7 +52,7 @@ pub fn take_spanned_accessor<'input>(
             Err(err @ Err::Failure(_)) => return Err(err),
             Err(_) => break,
         }
-    };
+    }
 
     let Ok((input, _)) = tag::<_, _, NomError>("}")(input) else {
         let span_start = opening.get_utf8_column() - 1;
@@ -76,9 +81,7 @@ pub fn take_spanned_accessor<'input>(
     ))
 }
 
-fn take_spanned_key<'input>(
-    input: LocatedSpan<&'input str>,
-) -> PResult<'input, SpannedAccessorKey> {
+fn take_spanned_key(input: LocatedSpan<&str>) -> PResult<SpannedAccessorKey> {
     let (rest, key) = take_key(input)?;
     let span_start = input.get_utf8_column() - 1;
     let span_byte_length = input.len() - rest.len();
@@ -95,11 +98,11 @@ fn take_spanned_key<'input>(
     ))
 }
 
-fn take_key<'input>(input: LocatedSpan<&'input str>) -> PResult<'input, AccessorKey> {
+fn take_key(input: LocatedSpan<&str>) -> PResult<AccessorKey> {
     alt((take_string_key, take_numeric_key))(input)
 }
 
-fn take_numeric_key<'input>(input: LocatedSpan<&'input str>) -> PResult<'input, AccessorKey> {
+fn take_numeric_key(input: LocatedSpan<&str>) -> PResult<AccessorKey> {
     let Ok((input, opening_bracket)) = tag::<_, _, NomError>("[")(input) else {
         let span_start = input.get_utf8_column() - 1;
         let next_separator = find_next_separator(input);
@@ -140,7 +143,7 @@ fn take_numeric_key<'input>(input: LocatedSpan<&'input str>) -> PResult<'input, 
     Ok((input, index.into()))
 }
 
-fn take_string_key<'input>(input: LocatedSpan<&'input str>) -> PResult<'input, AccessorKey> {
+fn take_string_key(input: LocatedSpan<&str>) -> PResult<AccessorKey> {
     let Ok((input, _)) = tag::<_, _, NomError>(".")(input) else {
         let span_start = input.get_utf8_column() - 1;
         let next_separator = find_next_separator(input);
@@ -155,10 +158,20 @@ fn take_string_key<'input>(input: LocatedSpan<&'input str>) -> PResult<'input, A
         }));
     };
 
-    match take_string_with_escape_until(is_separator, RESERVED_TOKEN)(input) {
-        Ok((rest, string)) => Ok((rest, string.into())),
-        Err(err) => Err(err),
-    }
+    dbg!(&input);
+    let (input, key) = if input.fragment().starts_with('"') {
+        let (input, _) = tag("\"")(input)?;
+        dbg!(&input);
+
+        terminated(
+            take_string_with_escape_until(|c| c == '"', RESERVED_RAW_LITERAL),
+            tag("\""),
+        )(input)?
+    } else {
+        take_string_with_escape_until(is_separator, RESERVED_TOKEN)(input)?
+    };
+
+    Ok((input, key.into()))
 }
 
 fn find_next_separator(input: LocatedSpan<&str>) -> usize {
@@ -172,10 +185,10 @@ fn is_separator(c: char) -> bool {
     c == '.' || c == '[' || c == '}'
 }
 
-fn take_string_with_escape_until<'input, Cond: Fn(char) -> bool + Copy>(
+fn take_string_with_escape_until<'token, Cond: Fn(char) -> bool + Copy + 'token>(
     cond: Cond,
-    reserved_token: &'input [char]
-) -> impl Fn(LocatedSpan<&'input str>) -> PResult<'input, String> {
+    reserved_token: &'token [char],
+) -> impl Fn(LocatedSpan<&str>) -> PResult<String> + 'token {
     move |mut input| {
         let mut buf = String::new();
         loop {
@@ -183,7 +196,7 @@ fn take_string_with_escape_until<'input, Cond: Fn(char) -> bool + Copy>(
                 return Ok((input, buf));
             };
 
-            let (rest, ch) = alt((take_escaped_char(reserved_token), take_char))(input)?;
+            let (rest, ch) = alt((take_escaped_char(reserved_token), take_char(reserved_token)))(input)?;
 
             input = rest;
             buf.push(ch);
@@ -191,28 +204,31 @@ fn take_string_with_escape_until<'input, Cond: Fn(char) -> bool + Copy>(
     }
 }
 
-fn take_escaped_char<'input>(reserved_token: &'input [char]) -> impl Fn(LocatedSpan<&'input str>) -> PResult<'input, char> {
+fn take_escaped_char<'token>(
+    reserved_token: &'token [char],
+) -> impl Fn(LocatedSpan<&str>) -> PResult<char> + 'token {
     move |input| {
-    let (input, first) = tag("\\")(input)?;
-    let (rest, ch) = anychar(input)?;
-    match ch {
-        'u' => take_unicode(rest),
-        'n' => Ok((rest, '\n')),
-        't' => Ok((rest, '\t')),
-        'r' => Ok((rest, '\r')),
-        ch if reserved_token.contains(&ch) => Ok((rest, ch)),
-        _ => {
-            let span_start = first.get_utf8_column() - 1;
-            let span_end = rest.get_utf8_column() - 1;
-            Err(Err::Failure(AccessorParserError {
-                kind: AccessorParserErrorKind::InvalidEscapeCharacter(ch),
-                span: AccessorParserSpan {
-                    start: span_start,
-                    end: span_end,
-                },
-            }))
+        let (input, first) = tag("\\")(input)?;
+        let (rest, ch) = anychar(input)?;
+        match ch {
+            'u' => take_unicode(rest),
+            'n' => Ok((rest, '\n')),
+            't' => Ok((rest, '\t')),
+            'r' => Ok((rest, '\r')),
+            ch if reserved_token.contains(&ch) => Ok((rest, ch)),
+            _ => {
+                let span_start = first.get_utf8_column() - 1;
+                let span_end = rest.get_utf8_column() - 1;
+                Err(Err::Failure(AccessorParserError {
+                    kind: AccessorParserErrorKind::InvalidEscapeCharacter(ch),
+                    span: AccessorParserSpan {
+                        start: span_start,
+                        end: span_end,
+                    },
+                }))
+            }
         }
-    }}
+    }
 }
 
 fn take_unicode(input: LocatedSpan<&str>) -> PResult<char> {
@@ -276,19 +292,21 @@ fn take_unicode(input: LocatedSpan<&str>) -> PResult<char> {
     Ok((input, ch))
 }
 
-fn take_char(input: LocatedSpan<&str>) -> PResult<char> {
-    let (rest, ch) = anychar(input)?;
-    if RESERVED_TOKEN.contains(&ch) {
-        return Err(Err::Failure(AccessorParserError {
-            kind: AccessorParserErrorKind::InvalidCharacter(ch),
-            span: AccessorParserSpan {
-                start: input.get_utf8_column() - 1,
-                end: input.get_utf8_column() - 1 + 1,
-            },
-        }));
-    }
+fn take_char<'token>(reserved_token: &'token [char]) -> impl Fn(LocatedSpan<&str>) -> PResult<char> + 'token {
+    move |input| {
+        let (rest, ch) = anychar(input)?;
+        if reserved_token.contains(&ch) {
+            return Err(Err::Failure(AccessorParserError {
+                kind: AccessorParserErrorKind::InvalidCharacter(ch),
+                span: AccessorParserSpan {
+                    start: input.get_utf8_column() - 1,
+                    end: input.get_utf8_column() - 1 + 1,
+                },
+            }));
+        }
 
-    Ok((rest, ch))
+        Ok((rest, ch))
+    }
 }
 
 #[cfg(test)]
@@ -303,12 +321,13 @@ mod tests {
 
     use super::{
         take_char, take_escaped_char, take_key, take_numeric_key, take_spanned_accessor,
-        take_spanned_key, take_string_key, take_string_with_escape_until, take_unicode, AccessorKey,
+        take_spanned_key, take_string_key, take_string_with_escape_until, take_unicode,
+        AccessorKey,
     };
 
     #[test]
     fn should_take_single_char() {
-        let (rest, ch) = take_char("abcd".into()).unwrap();
+        let (rest, ch) = take_char(&[])("abcd".into()).unwrap();
         assert_eq!('a', ch);
         assert_eq!("bcd", *rest.fragment());
         assert_eq!(1, rest.get_utf8_column() - 1);
@@ -316,7 +335,7 @@ mod tests {
 
     #[test]
     fn should_fail_to_take_reserved_char() {
-        let err = take_char(".bcd".into()).unwrap_err();
+        let err = take_char(&['.'])(".bcd".into()).unwrap_err();
         match err {
             nom::Err::Failure(AccessorParserError {
                 kind: AccessorParserErrorKind::InvalidCharacter('.'),
@@ -328,8 +347,8 @@ mod tests {
 
     #[test]
     fn should_take_multiple_chars() {
-        let (input, ch1) = take_char("abcd".into()).unwrap();
-        let (rest, ch2) = take_char(input).unwrap();
+        let (input, ch1) = take_char(&[])("abcd".into()).unwrap();
+        let (rest, ch2) = take_char(&[])(input).unwrap();
         assert_eq!('a', ch1);
         assert_eq!('b', ch2);
         assert_eq!("cd", *rest.fragment());
@@ -338,8 +357,8 @@ mod tests {
 
     #[test]
     fn should_take_only_first_chars() {
-        let (input, ch1) = take_char("a.cd".into()).unwrap();
-        let err = take_char(input).unwrap_err();
+        let (input, ch1) = take_char(&['.'])("a.cd".into()).unwrap();
+        let err = take_char(&['.'])(input).unwrap_err();
         assert_eq!('a', ch1);
         match err {
             nom::Err::Failure(AccessorParserError {
@@ -464,7 +483,8 @@ mod tests {
 
     #[test]
     fn should_take_string() {
-        let (rest, string) = take_string_with_escape_until(|_| false, &['\\'])("\\u{61}bcd\\\\".into()).unwrap();
+        let (rest, string) =
+            take_string_with_escape_until(|_| false, &['\\'])("\\u{61}bcd\\\\".into()).unwrap();
         assert_eq!("abcd\\", string.as_str());
         assert_eq!("", *rest.fragment());
         assert_eq!(11, rest.get_utf8_column() - 1);
@@ -472,7 +492,8 @@ mod tests {
 
     #[test]
     fn should_take_string_until() {
-        let (rest, string) = take_string_with_escape_until(|c| c == 'c', &[])("\\u{61}bcd\\\\".into()).unwrap();
+        let (rest, string) =
+            take_string_with_escape_until(|c| c == 'c', &[])("\\u{61}bcd\\\\".into()).unwrap();
         assert_eq!("ab", string.as_str());
         assert_eq!("cd\\\\", *rest.fragment());
         assert_eq!(7, rest.get_utf8_column() - 1);
@@ -520,6 +541,25 @@ mod tests {
         assert_eq!(4, rest.get_utf8_column() - 1);
         match key {
             AccessorKey::String(s) if s.as_ref() == "key" => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_take_rawstring_key() {
+        let (rest, key) = take_string_key(".\"key\"".into()).unwrap();
+        assert_eq!("", *rest.fragment());
+        assert_eq!(6, rest.get_utf8_column() - 1);
+        match key {
+            AccessorKey::String(key) if key.as_ref() == "key" => {}
+            err => unreachable!("{:?}", err),
+        }
+
+        let (rest, key) = take_string_key(".\"key.same\"".into()).unwrap();
+        assert_eq!("", *rest.fragment());
+        assert_eq!(11, rest.get_utf8_column() - 1);
+        match key {
+            AccessorKey::String(key) if key.as_ref() == "key.same" => {}
             err => unreachable!("{:?}", err),
         }
     }
