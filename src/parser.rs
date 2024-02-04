@@ -1,56 +1,17 @@
 use nom::{
-    branch::alt,
-    bytes::complete::{tag, take_until},
-    character::complete::anychar,
-    error::Error,
-    sequence::terminated,
-    Err,
+    branch::alt, bytes::complete::{tag, take_until}, character::complete::anychar, combinator::verify, error::Error, sequence::terminated, Err
 };
 use nom_locate::LocatedSpan;
 
-use crate::error::{
-    AccessorParserError, AccessorParserErrorKind, AccessorParserSpan, InvalidUnicodeError,
+use crate::{
+    error::{AccessorParserError, AccessorParserErrorKind, InvalidUnicodeError},
+    AccessorKey, AccessorParserSpan, SpannedAccessor, SpannedAccessorKey,
 };
 
 const RESERVED_TOKEN: &[char] = &['\\', '{', '}', '[', ']', '.', '$'];
 
 type PResult<'input, Output> = Result<(LocatedSpan<&'input str>, Output), Err<AccessorParserError>>;
 type NomError<'input> = Error<LocatedSpan<&'input str>>;
-
-#[derive(Clone, Debug)]
-pub struct SpannedAccessor {
-    keys: Box<[SpannedAccessorKey]>,
-    span: AccessorParserSpan,
-}
-
-#[derive(Clone, Debug)]
-pub struct Accessor {
-    keys: Box<[AccessorKey]>,
-}
-
-#[derive(Clone, Debug)]
-pub struct SpannedAccessorKey {
-    key: AccessorKey,
-    span: AccessorParserSpan,
-}
-
-#[derive(Clone, Debug)]
-pub enum AccessorKey {
-    String(Box<str>),
-    Numeric(usize),
-}
-
-impl From<String> for AccessorKey {
-    fn from(value: String) -> Self {
-        AccessorKey::String(value.into_boxed_str())
-    }
-}
-
-impl From<usize> for AccessorKey {
-    fn from(value: usize) -> Self {
-        AccessorKey::Numeric(value)
-    }
-}
 
 pub fn take_spanned_accessor<'input>(
     input: LocatedSpan<&'input str>,
@@ -77,14 +38,14 @@ pub fn take_spanned_accessor<'input>(
     let mut keys = vec![root];
     let mut input = rest;
 
-    let error = loop {
+    loop {
         match take_spanned_key(input) {
             Ok((next, key)) => {
                 keys.push(key);
                 input = next;
             }
             Err(err @ Err::Failure(_)) => return Err(err),
-            Err(err) => break err,
+            Err(_) => break,
         }
     };
 
@@ -211,19 +172,15 @@ fn is_separator(c: char) -> bool {
     c == '.' || c == '[' || c == '}'
 }
 
-fn take_string_until<'input, Cond: Fn(char) -> bool>(
+fn take_string_until<'input, Cond: Fn(char) -> bool + Copy>(
     cond: Cond,
 ) -> impl Fn(LocatedSpan<&'input str>) -> PResult<'input, String> {
     move |mut input| {
         let mut buf = String::new();
         loop {
-            let Ok((rest, ch)) = anychar::<_, NomError>(input) else {
+            let Ok(_) = verify(anychar::<_, NomError>, |c| !cond(*c))(input) else {
                 return Ok((input, buf));
             };
-
-            if cond(ch) {
-                return Ok((input, buf));
-            }
 
             let (rest, ch) = alt((take_escaped_char, take_char))(input)?;
 
@@ -337,15 +294,14 @@ mod tests {
     use nom::multi::many0;
 
     use crate::{
-        error::{
-            AccessorParserError, AccessorParserErrorKind, AccessorParserSpan, InvalidUnicodeError,
-        },
+        error::{AccessorParserError, AccessorParserErrorKind, InvalidUnicodeError},
         parser::SpannedAccessorKey,
+        AccessorParserSpan,
     };
 
     use super::{
         take_char, take_escaped_char, take_key, take_numeric_key, take_spanned_accessor,
-        take_string_key, take_string_until, take_unicode, AccessorKey,
+        take_spanned_key, take_string_key, take_string_until, take_unicode, AccessorKey,
     };
 
     #[test]
@@ -710,6 +666,40 @@ mod tests {
     }
 
     #[test]
+    fn should_take_key_with_span() {
+        let (rest, key) = take_spanned_key(".key".into()).unwrap();
+        assert_eq!("", *rest.fragment());
+        assert_eq!(4, rest.get_utf8_column() - 1);
+        match key {
+            SpannedAccessorKey {
+                key: AccessorKey::String(key),
+                span: AccessorParserSpan { start: 0, end: 4 },
+            } if key.as_ref() == "key" => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
+    fn should_take_multiple_keys_with_span() {
+        let (rest, key) = many0(take_spanned_key)(".key1[1234].key2".into()).unwrap();
+        assert_eq!("", *rest.fragment());
+        assert_eq!(16, rest.get_utf8_column() - 1);
+        match key.as_slice() {
+            [SpannedAccessorKey {
+                key: AccessorKey::String(key1),
+                span: AccessorParserSpan { start: 0, end: 5 },
+            }, SpannedAccessorKey {
+                key: AccessorKey::Numeric(1234),
+                span: AccessorParserSpan { start: 5, end: 11 },
+            }, SpannedAccessorKey {
+                key: AccessorKey::String(key2),
+                span: AccessorParserSpan { start: 11, end: 16 },
+            }] if key1.as_ref() == "key1" && key2.as_ref() == "key2" => {}
+            err => unreachable!("{:?}", err),
+        }
+    }
+
+    #[test]
     fn should_not_return_accessor_without_brackets() {
         let (rest, accessor) = take_spanned_accessor("key1[1234].key2".into()).unwrap();
         assert_eq!("key1[1234].key2", *rest.fragment());
@@ -752,7 +742,7 @@ mod tests {
                 match accessor.keys.as_ref() {
                     [SpannedAccessorKey {
                         key: AccessorKey::String(key1),
-                        span: AccessorParserSpan { start: 2, end:6 },
+                        span: AccessorParserSpan { start: 2, end: 6 },
                     }, SpannedAccessorKey {
                         key: AccessorKey::Numeric(1234),
                         span: AccessorParserSpan { start: 6, end: 12 },

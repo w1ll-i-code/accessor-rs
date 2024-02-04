@@ -1,16 +1,22 @@
 use nom::error::{ErrorKind, ParseError};
 use nom_locate::LocatedSpan;
 
-#[derive(Clone, Copy, Debug)]
-pub struct AccessorParserSpan {
-    pub(crate) start: usize,
-    pub(crate) end: usize,
-}
+use crate::AccessorParserSpan;
 
 #[derive(Clone, Copy, Debug)]
 pub struct AccessorParserError {
     pub(crate) kind: AccessorParserErrorKind,
     pub(crate) span: AccessorParserSpan,
+}
+
+impl AccessorParserError {
+    pub fn kind(&self) -> AccessorParserErrorKind {
+        self.kind
+    }
+
+    pub fn span(&self) -> AccessorParserSpan {
+        self.span
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -21,7 +27,6 @@ pub enum AccessorParserErrorKind {
     InvalidAccessor,
     MissingClosingBracket,
     NotANumber,
-    NotAnAccessor,
     Unknown(ErrorKind),
 }
 
