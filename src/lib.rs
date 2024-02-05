@@ -1,5 +1,6 @@
 pub mod error;
 pub mod parser;
+pub mod string_interpolator;
 
 #[derive(Clone, Debug)]
 pub struct SpannedAccessor {

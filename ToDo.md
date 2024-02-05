@@ -5,9 +5,11 @@
     [x] raw strings
 [ ] Accessor / Extractor trait
     [ ] implement behind a feature for serde_json
-[ ] string interpolation
+    [ ] derive macro
+[x] string interpolation
 [ ] root validation
     [ ] known roots
     [ ] known object roots
     [ ] known paths
-[ ] backwards compatibility
+    [ ] refuse known object roots in accessor.
+[x] backwards compatibility

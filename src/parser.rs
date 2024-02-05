@@ -14,16 +14,21 @@ use crate::{
     AccessorKey, AccessorParserSpan, SpannedAccessor, SpannedAccessorKey,
 };
 
-const RESERVED_TOKEN: &[char] = &['\\', '{', '}', '[', ']', '.', '$', '"'];
-const RESERVED_RAW_LITERAL: &[char] = &['\\', '"'];
+const RESERVED_TOKEN: &[char] = &['{', '}', '[', ']', '.', '$', '"'];
+const RESERVED_RAW_LITERAL: &[char] = &['"'];
 
 type PResult<'input, Output> = Result<(LocatedSpan<&'input str>, Output), Err<AccessorParserError>>;
 type NomError<'input> = Error<LocatedSpan<&'input str>>;
 
-pub fn take_spanned_accessor(input: LocatedSpan<&str>) -> PResult<Option<SpannedAccessor>> {
-    let fn_input = input;
+pub(crate) fn take_spanned_accessor(input: LocatedSpan<&str>) -> PResult<SpannedAccessor> {
     let Ok((input, opening)) = tag::<_, _, NomError>("${")(input) else {
-        return Ok((input, None));
+        let span_start = input.get_utf8_column() - 1;
+        return Err(Err::Failure(
+            AccessorParserError {
+                kind: AccessorParserErrorKind::InvalidAccessorKey,
+                span: AccessorParserSpan { start: span_start, end: span_start + 1 }
+            }
+        ));
     };
 
     let (rest, root) = take_string_with_escape_until(is_separator, RESERVED_TOKEN)(input)?;
@@ -66,18 +71,17 @@ pub fn take_spanned_accessor(input: LocatedSpan<&str>) -> PResult<Option<Spanned
     };
 
     let span_start = opening.get_utf8_column() - 1;
-    let span_length_bytes = input.get_utf8_column() - 1;
-    let span_end = span_start + fn_input[..span_length_bytes].chars().count();
+    let span_end = input.get_utf8_column() - 1;
 
     Ok((
         input,
-        Some(SpannedAccessor {
+        SpannedAccessor {
             keys: keys.into_boxed_slice(),
             span: AccessorParserSpan {
                 start: span_start,
                 end: span_end,
             },
-        }),
+        },
     ))
 }
 
@@ -109,7 +113,7 @@ fn take_numeric_key(input: LocatedSpan<&str>) -> PResult<AccessorKey> {
         let span_end = input.fragment()[..next_separator].chars().count();
 
         return Err(Err::Error(AccessorParserError {
-            kind: AccessorParserErrorKind::InvalidAccessor,
+            kind: AccessorParserErrorKind::InvalidAccessorKey,
             span: AccessorParserSpan {
                 start: span_start,
                 end: span_end,
@@ -150,7 +154,7 @@ fn take_string_key(input: LocatedSpan<&str>) -> PResult<AccessorKey> {
         let span_end = input.fragment()[..next_separator].chars().count();
 
         return Err(Err::Error(AccessorParserError {
-            kind: AccessorParserErrorKind::InvalidAccessor,
+            kind: AccessorParserErrorKind::InvalidAccessorKey,
             span: AccessorParserSpan {
                 start: span_start,
                 end: span_end,
@@ -158,11 +162,8 @@ fn take_string_key(input: LocatedSpan<&str>) -> PResult<AccessorKey> {
         }));
     };
 
-    dbg!(&input);
     let (input, key) = if input.fragment().starts_with('"') {
         let (input, _) = tag("\"")(input)?;
-        dbg!(&input);
-
         terminated(
             take_string_with_escape_until(|c| c == '"', RESERVED_RAW_LITERAL),
             tag("\""),
@@ -185,7 +186,7 @@ fn is_separator(c: char) -> bool {
     c == '.' || c == '[' || c == '}'
 }
 
-fn take_string_with_escape_until<'token, Cond: Fn(char) -> bool + Copy + 'token>(
+pub(crate) fn take_string_with_escape_until<'token, Cond: Fn(char) -> bool + Copy + 'token>(
     cond: Cond,
     reserved_token: &'token [char],
 ) -> impl Fn(LocatedSpan<&str>) -> PResult<String> + 'token {
@@ -216,6 +217,7 @@ fn take_escaped_char<'token>(
             'n' => Ok((rest, '\n')),
             't' => Ok((rest, '\t')),
             'r' => Ok((rest, '\r')),
+            '\\' => Ok((rest, '\\')),
             ch if reserved_token.contains(&ch) => Ok((rest, ch)),
             _ => {
                 let span_start = first.get_utf8_column() - 1;
@@ -594,7 +596,7 @@ mod tests {
         let err = take_string_key("key".into()).unwrap_err();
         match err {
             nom::Err::Error(AccessorParserError {
-                kind: AccessorParserErrorKind::InvalidAccessor,
+                kind: AccessorParserErrorKind::InvalidAccessorKey,
                 span: AccessorParserSpan { start: 0, end: 3 },
             }) => {}
             err => unreachable!("{:?}", err),
@@ -606,7 +608,7 @@ mod tests {
         let err = take_string_key("key.key".into()).unwrap_err();
         match err {
             nom::Err::Error(AccessorParserError {
-                kind: AccessorParserErrorKind::InvalidAccessor,
+                kind: AccessorParserErrorKind::InvalidAccessorKey,
                 span: AccessorParserSpan { start: 0, end: 3 },
             }) => {}
             err => unreachable!("{:?}", err),
@@ -615,7 +617,7 @@ mod tests {
         let err = take_string_key("key[1234]".into()).unwrap_err();
         match err {
             nom::Err::Error(AccessorParserError {
-                kind: AccessorParserErrorKind::InvalidAccessor,
+                kind: AccessorParserErrorKind::InvalidAccessorKey,
                 span: AccessorParserSpan { start: 0, end: 3 },
             }) => {}
             err => unreachable!("{:?}", err),
@@ -624,7 +626,7 @@ mod tests {
         let err = take_string_key("key} ---".into()).unwrap_err();
         match err {
             nom::Err::Error(AccessorParserError {
-                kind: AccessorParserErrorKind::InvalidAccessor,
+                kind: AccessorParserErrorKind::InvalidAccessorKey,
                 span: AccessorParserSpan { start: 0, end: 3 },
             }) => {}
             err => unreachable!("{:?}", err),
@@ -658,7 +660,7 @@ mod tests {
         let err = take_numeric_key("1234]".into()).unwrap_err();
         match err {
             nom::Err::Error(AccessorParserError {
-                kind: AccessorParserErrorKind::InvalidAccessor,
+                kind: AccessorParserErrorKind::InvalidAccessorKey,
                 span: AccessorParserSpan { start: 0, end: 5 },
             }) => {}
             err => unreachable!("{:?}", err),
@@ -745,34 +747,18 @@ mod tests {
     }
 
     #[test]
-    fn should_not_return_accessor_without_brackets() {
-        let (rest, accessor) = take_spanned_accessor("key1[1234].key2".into()).unwrap();
-        assert_eq!("key1[1234].key2", *rest.fragment());
-        assert_eq!(0, rest.get_utf8_column() - 1);
-        match accessor {
-            None => {}
-            Some(accessor) => unreachable!("{:?}", accessor),
-        }
-    }
-
-    #[test]
     fn should_return_accessor_with_root() {
         let (rest, accessor) = take_spanned_accessor("${key}".into()).unwrap();
         assert_eq!("", *rest.fragment());
         assert_eq!(6, rest.get_utf8_column() - 1);
-        match accessor {
-            Some(accessor) => {
-                assert_eq!(1, accessor.keys.len());
-                assert_eq!((0, 6), (accessor.span.start, accessor.span.end));
-                match accessor.keys.as_ref() {
-                    [SpannedAccessorKey {
-                        key: AccessorKey::String(key),
-                        span: AccessorParserSpan { start: 2, end: 5 },
-                    }] if key.as_ref() == "key" => {}
-                    err => unreachable!("{:?}", err),
-                }
-            }
-            None => unreachable!(),
+        assert_eq!(1, accessor.keys.len());
+        assert_eq!((0, 6), (accessor.span.start, accessor.span.end));
+        match accessor.keys.as_ref() {
+            [SpannedAccessorKey {
+                key: AccessorKey::String(key),
+                span: AccessorParserSpan { start: 2, end: 5 },
+            }] if key.as_ref() == "key" => {}
+            err => unreachable!("{:?}", err),
         }
     }
 
@@ -781,24 +767,19 @@ mod tests {
         let (rest, accessor) = take_spanned_accessor("${key1[1234].key2}".into()).unwrap();
         assert_eq!("", *rest.fragment());
         assert_eq!(18, rest.get_utf8_column() - 1);
-        match accessor {
-            Some(accessor) => {
-                assert_eq!((0, 18), (accessor.span.start, accessor.span.end));
-                match accessor.keys.as_ref() {
-                    [SpannedAccessorKey {
-                        key: AccessorKey::String(key1),
-                        span: AccessorParserSpan { start: 2, end: 6 },
-                    }, SpannedAccessorKey {
-                        key: AccessorKey::Numeric(1234),
-                        span: AccessorParserSpan { start: 6, end: 12 },
-                    }, SpannedAccessorKey {
-                        key: AccessorKey::String(key2),
-                        span: AccessorParserSpan { start: 12, end: 17 },
-                    }] if key1.as_ref() == "key1" && key2.as_ref() == "key2" => {}
-                    err => unreachable!("{:?}", err),
-                }
-            }
-            None => unreachable!(),
+        assert_eq!((0, 18), (accessor.span.start, accessor.span.end));
+        match accessor.keys.as_ref() {
+            [SpannedAccessorKey {
+                key: AccessorKey::String(key1),
+                span: AccessorParserSpan { start: 2, end: 6 },
+            }, SpannedAccessorKey {
+                key: AccessorKey::Numeric(1234),
+                span: AccessorParserSpan { start: 6, end: 12 },
+            }, SpannedAccessorKey {
+                key: AccessorKey::String(key2),
+                span: AccessorParserSpan { start: 12, end: 17 },
+            }] if key1.as_ref() == "key1" && key2.as_ref() == "key2" => {}
+            err => unreachable!("{:?}", err),
         }
     }
 

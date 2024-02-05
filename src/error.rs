@@ -24,8 +24,9 @@ pub enum AccessorParserErrorKind {
     InvalidCharacter(char),
     InvalidEscapeCharacter(char),
     InvalidUnicode(InvalidUnicodeError),
-    InvalidAccessor,
+    InvalidAccessorKey,
     MissingClosingBracket,
+    InvalidAccessor,
     NotANumber,
     Unknown(ErrorKind),
 }
