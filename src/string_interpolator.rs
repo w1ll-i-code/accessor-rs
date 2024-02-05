@@ -60,7 +60,7 @@ pub fn take_spanned_string_interpolator(
         let (rest, prefix) = take_string_with_escape_until(|c| c == '$', &['$'])(input)?;
         if rest.is_empty() {
             return Ok(SpannedStringInterpolator {
-                segments: segments.into(),
+                segments,
                 postfix: prefix.into(),
             });
         }

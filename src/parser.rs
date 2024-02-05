@@ -207,9 +207,7 @@ pub(crate) fn take_string_with_escape_until<'token, Cond: Fn(char) -> bool + Cop
     }
 }
 
-fn take_escaped_char<'token>(
-    reserved_token: &'token [char],
-) -> impl Fn(LocatedSpan<&str>) -> PResult<char> + 'token {
+fn take_escaped_char(reserved_token: &[char]) -> impl Fn(LocatedSpan<&str>) -> PResult<char> + '_ {
     move |input| {
         let (input, first) = tag("\\")(input)?;
         let (rest, ch) = anychar(input)?;
@@ -302,9 +300,7 @@ fn take_unicode(input: LocatedSpan<&str>) -> PResult<char> {
     Ok((input, ch))
 }
 
-fn take_char<'token>(
-    reserved_token: &'token [char],
-) -> impl Fn(LocatedSpan<&str>) -> PResult<char> + 'token {
+fn take_char(reserved_token: &[char]) -> impl Fn(LocatedSpan<&str>) -> PResult<char> + '_ {
     move |input| {
         let (rest, ch) = anychar(input)?;
         if reserved_token.contains(&ch) {

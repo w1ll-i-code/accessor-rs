@@ -11,5 +11,5 @@
     [x] known roots
     [x] known object roots
     [x] known paths
-    [ ] refuse known object roots in accessor.
-[x] backwards compatibility
+    [x] refuse known object roots in accessor.
+[ ] backwards compatibility

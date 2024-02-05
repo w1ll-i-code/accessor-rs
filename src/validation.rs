@@ -88,38 +88,95 @@ fn path_contains(
                 span,
             }, remaining_keys @ ..] => match children.get(key.as_ref()) {
                 Some(node) => path_contains(node, accessor_span, remaining_keys, is_interpolator),
-                None => Err(AccessorValidationError {
-                    kind: AccessorValidationErrorKind::UnknownField,
-                    span: *span,
-                }),
+                None => {
+                    let mut keys: Vec<_> = children
+                        .keys()
+                        .cloned()
+                        .map(|s| (edit_distance(&s, key.as_ref()), s))
+                        .collect();
+                    keys.sort();
+                    let keys = keys.into_iter().map(|(_edit_distance, key)| key).collect();
+
+                    Err(AccessorValidationError {
+                        kind: AccessorValidationErrorKind::UnknownKey {
+                            possible_keys: keys,
+                        },
+                        span: *span,
+                    })
+                }
             },
         },
     }
 }
 
+// see wikipedia: https://en.wikipedia.org/wiki/Levenshtein_distance
+fn edit_distance(s1: &str, s2: &str) -> u32 {
+    // store character and distance into a struct to avoid char boundary problems while indexing
+    struct DistanceMapEntry {
+        distance: u32,
+        character: char,
+    }
+
+    // Select the shorter string as s1.
+    let (s1, s2) = if s1.len() < s2.len() {
+        (s1, s2)
+    } else {
+        (s2, s1)
+    };
+
+    // Allocate only memory for string1
+    let len = s1.chars().count() + 1;
+
+    // Store the first row in the algorithm (edit distance from empty string)
+    // use the null terminator as a place holder. We assume no one uses that in json keys.
+    let mut table_buffer = Vec::with_capacity(len);
+    table_buffer.push(DistanceMapEntry {
+        distance: 0,
+        character: '\0',
+    });
+
+    for (idx, ch1) in s1.chars().enumerate() {
+        table_buffer.push(DistanceMapEntry {
+            distance: (idx + 1) as u32,
+            character: ch1,
+        });
+    }
+
+    // Loop through all the characters of the second string
+    for (start_distance, ch2) in s2.chars().enumerate() {
+        let mut previous_distance = start_distance as u32 + 1;
+        // compute the edit distance.
+        for idx in 1..len {
+            let DistanceMapEntry {
+                distance,
+                character,
+            } = table_buffer[idx];
+            let mut this_distance = previous_distance
+                .min(distance)
+                .min(table_buffer[idx - 1].distance);
+            if ch2 != character {
+                this_distance += 1;
+            }
+            (table_buffer[idx - 1].distance, previous_distance) =
+                (previous_distance, this_distance);
+        }
+
+        // flush the last value out.
+        table_buffer[len - 1].distance = previous_distance;
+    }
+
+    table_buffer[len - 1].distance
+}
+
 #[cfg(test)]
 mod test {
-    use crate::{
-        parser::take_spanned_accessor,
-        string_interpolator::{take_spanned_string_interpolator, SpannedStringInterpolator},
-        validation::PathNode,
-        SpannedAccessor,
-    };
-    use std::collections::HashMap;
+    use super::edit_distance;
 
     #[test]
-    fn test() {
-        let (rest, accessor) = take_spanned_accessor("${event.created_ms.pippo}".into()).unwrap();
-        dbg!(&accessor);
-
-        let mut event = HashMap::new();
-        event.insert("created_ms".to_owned(), PathNode::KnownField);
-
-        let mut children = HashMap::new();
-        children.insert("event".to_owned(), PathNode::Node { children: event });
-
-        let root = PathNode::Node { children };
-        let result = root.validate_interpolation_accessor(&accessor);
-        dbg!(result);
+    fn should_compute_edit_distance() {
+        // see wikipedia: https://en.wikipedia.org/wiki/Levenshtein_distance#Iterative_with_full_matrix
+        assert_eq!(3, edit_distance("saturday", "sunday"));
+        assert_eq!(3, edit_distance("kitten", "sitting"));
+        assert_eq!(4, edit_distance("levenshtein", "meilenstein"));
     }
 }

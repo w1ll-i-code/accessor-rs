@@ -57,7 +57,7 @@ impl<'input> ParseError<LocatedSpan<&'input str>> for AccessorParserError {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub struct AccessorValidationError {
     pub(crate) kind: AccessorValidationErrorKind,
     pub(crate) span: AccessorParserSpan,
@@ -65,7 +65,7 @@ pub struct AccessorValidationError {
 
 impl AccessorValidationError {
     pub fn kind(&self) -> AccessorValidationErrorKind {
-        self.kind
+        self.kind.clone()
     }
 
     pub fn span(&self) -> AccessorParserSpan {
@@ -73,12 +73,12 @@ impl AccessorValidationError {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum AccessorValidationErrorKind {
     NumericIndexInMap,
     InvalidRoot,
     InvalidObjectRoot,
     NotIndexable,
-    UnknownField,
+    UnknownKey { possible_keys: Vec<String> },
     NotStringRepresentable,
 }
