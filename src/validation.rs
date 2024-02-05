@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     error::{AccessorValidationError, AccessorValidationErrorKind},
+    string_interpolator::SpannedStringInterpolator,
     AccessorKey, AccessorParserSpan, SpannedAccessor, SpannedAccessorKey,
 };
 
@@ -21,11 +22,25 @@ impl PathNode {
         self.validate(accessor, false)
     }
 
-    pub fn validate_interpolation_accessor(
+    pub fn validate_interpolator(
         &self,
-        accessor: &SpannedAccessor,
-    ) -> Result<(), AccessorValidationError> {
-        self.validate(accessor, true)
+        interpolator: &SpannedStringInterpolator,
+    ) -> Result<(), Vec<AccessorValidationError>> {
+        let mut errors = vec![];
+
+        for segment in &interpolator.segments {
+            let Err(err) = self.validate(&segment.accessor, true) else {
+                continue;
+            };
+
+            errors.push(err)
+        }
+
+        if errors.is_empty() {
+            return Ok(());
+        }
+
+        Err(errors)
     }
 
     fn validate(
@@ -170,7 +185,30 @@ fn edit_distance(s1: &str, s2: &str) -> u32 {
 
 #[cfg(test)]
 mod test {
-    use super::edit_distance;
+    use maplit::hashmap;
+
+    use super::{edit_distance, PathNode};
+    use crate::{
+        parser::take_spanned_accessor, string_interpolator::take_spanned_string_interpolator,
+    };
+
+    fn test_path_tree() -> PathNode {
+        PathNode::Node {
+            children: hashmap! {
+                "event".to_owned() => PathNode::Node { children: hashmap! {
+                    "created_ms".to_owned() => PathNode::KnownField,
+                    "metadata".to_owned() => PathNode::ObjectRoot,
+                    "payload".to_owned() => PathNode::ObjectRoot,
+                }},
+                "item".to_owned() => PathNode::Root,
+                "_variables".to_owned() => PathNode::Node { children: hashmap! {
+                    "target1".to_owned() => PathNode::Root,
+                    "target2".to_owned() => PathNode::Root,
+                    "target3".to_owned() => PathNode::KnownField,
+                }},
+            },
+        }
+    }
 
     #[test]
     fn should_compute_edit_distance() {
@@ -178,5 +216,37 @@ mod test {
         assert_eq!(3, edit_distance("saturday", "sunday"));
         assert_eq!(3, edit_distance("kitten", "sitting"));
         assert_eq!(4, edit_distance("levenshtein", "meilenstein"));
+    }
+
+    #[test]
+    fn should_validate_accessor_correctly() {
+        let valid_mappings = test_path_tree();
+
+        let (_, accessor) = take_spanned_accessor("${event.created_ms}".into()).unwrap();
+        valid_mappings.validate_accessor(&accessor).unwrap();
+
+        let (_, accessor) = take_spanned_accessor("${item}".into()).unwrap();
+        valid_mappings.validate_accessor(&accessor).unwrap();
+
+        let (_, accessor) = take_spanned_accessor("${_variables.target1.pippo}".into()).unwrap();
+        valid_mappings.validate_accessor(&accessor).unwrap();
+    }
+
+    #[test]
+    fn should_validate_interpolator_correctly() {
+        let valid_mappings = test_path_tree();
+
+        let interpolator =
+            take_spanned_string_interpolator("${event.created_ms} - ${item}".into()).unwrap();
+        valid_mappings.validate_interpolator(&interpolator).unwrap();
+
+        let interpolator =
+            take_spanned_string_interpolator("${item.pippo} - _variables.target1[1234]".into())
+                .unwrap();
+        valid_mappings.validate_interpolator(&interpolator).unwrap();
+
+        let interpolator =
+            take_spanned_string_interpolator("${_variables.target1.pippo}".into()).unwrap();
+        valid_mappings.validate_interpolator(&interpolator).unwrap();
     }
 }

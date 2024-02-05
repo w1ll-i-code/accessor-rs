@@ -8,12 +8,11 @@ use crate::{
 
 #[derive(Debug)]
 pub struct SpannedStringInterpolator {
-    segments: Vec<SpannedInterpolatorSegment>,
+    pub(crate) segments: Vec<SpannedInterpolatorSegment>,
     postfix: Box<str>,
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct StringInterpolator {
     segments: Box<[InterpolatorSegment]>,
     postfix: Box<str>,
@@ -31,7 +30,7 @@ impl From<SpannedStringInterpolator> for StringInterpolator {
 #[derive(Debug)]
 pub struct SpannedInterpolatorSegment {
     prefix: Box<str>,
-    accessor: SpannedAccessor,
+    pub(crate) accessor: SpannedAccessor,
 }
 
 #[derive(Debug)]
