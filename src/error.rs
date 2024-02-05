@@ -56,3 +56,29 @@ impl<'input> ParseError<LocatedSpan<&'input str>> for AccessorParserError {
         other
     }
 }
+
+#[derive(Debug, Copy, Clone)]
+pub struct AccessorValidationError {
+    pub(crate) kind: AccessorValidationErrorKind,
+    pub(crate) span: AccessorParserSpan,
+}
+
+impl AccessorValidationError {
+    pub fn kind(&self) -> AccessorValidationErrorKind {
+        self.kind
+    }
+
+    pub fn span(&self) -> AccessorParserSpan {
+        self.span
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum AccessorValidationErrorKind {
+    NumericIndexInMap,
+    InvalidRoot,
+    InvalidObjectRoot,
+    NotIndexable,
+    UnknownField,
+    NotStringRepresentable,
+}

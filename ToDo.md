@@ -7,9 +7,9 @@
     [ ] implement behind a feature for serde_json
     [ ] derive macro
 [x] string interpolation
-[ ] root validation
-    [ ] known roots
-    [ ] known object roots
-    [ ] known paths
+[x] root validation
+    [x] known roots
+    [x] known object roots
+    [x] known paths
     [ ] refuse known object roots in accessor.
 [x] backwards compatibility

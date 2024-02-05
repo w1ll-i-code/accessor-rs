@@ -23,12 +23,13 @@ type NomError<'input> = Error<LocatedSpan<&'input str>>;
 pub(crate) fn take_spanned_accessor(input: LocatedSpan<&str>) -> PResult<SpannedAccessor> {
     let Ok((input, opening)) = tag::<_, _, NomError>("${")(input) else {
         let span_start = input.get_utf8_column() - 1;
-        return Err(Err::Failure(
-            AccessorParserError {
-                kind: AccessorParserErrorKind::InvalidAccessorKey,
-                span: AccessorParserSpan { start: span_start, end: span_start + 1 }
-            }
-        ));
+        return Err(Err::Failure(AccessorParserError {
+            kind: AccessorParserErrorKind::InvalidAccessorKey,
+            span: AccessorParserSpan {
+                start: span_start,
+                end: span_start + 1,
+            },
+        }));
     };
 
     let (rest, root) = take_string_with_escape_until(is_separator, RESERVED_TOKEN)(input)?;
@@ -65,8 +66,8 @@ pub(crate) fn take_spanned_accessor(input: LocatedSpan<&str>) -> PResult<Spanned
             kind: AccessorParserErrorKind::MissingClosingBracket,
             span: AccessorParserSpan {
                 start: span_start,
-                end: span_start + 2
-            }
+                end: span_start + 2,
+            },
         }));
     };
 
@@ -237,8 +238,10 @@ fn take_escaped_char<'token>(
 fn take_unicode(input: LocatedSpan<&str>) -> PResult<char> {
     let Ok((input, _)) = tag::<_, _, NomError>("{")(input) else {
         let span_start = input.get_utf8_column() - 1;
-        return Err(Err::Failure(AccessorParserError{
-            kind: AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::MissingOpeningBracket),
+        return Err(Err::Failure(AccessorParserError {
+            kind: AccessorParserErrorKind::InvalidUnicode(
+                InvalidUnicodeError::MissingOpeningBracket,
+            ),
             span: AccessorParserSpan {
                 start: span_start,
                 end: span_start + 1,
@@ -246,13 +249,17 @@ fn take_unicode(input: LocatedSpan<&str>) -> PResult<char> {
         }));
     };
 
-    let Ok((input, unicode_code_point)) = terminated(take_until::<_, _, NomError>("}"), tag("}"))(input)  else {
+    let Ok((input, unicode_code_point)) =
+        terminated(take_until::<_, _, NomError>("}"), tag("}"))(input)
+    else {
         let span_start = input.get_utf8_column() - 1;
         let span_length = input.fragment().chars().count();
         let span_end = span_start + span_length;
 
         return Err(Err::Failure(AccessorParserError {
-            kind: AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::MissingClosingBracket),
+            kind: AccessorParserErrorKind::InvalidUnicode(
+                InvalidUnicodeError::MissingClosingBracket,
+            ),
             span: AccessorParserSpan {
                 start: span_start,
                 end: span_end,
@@ -279,14 +286,14 @@ fn take_unicode(input: LocatedSpan<&str>) -> PResult<char> {
     }
 
     let Ok(n) = u32::from_str_radix(unicode_code_point.fragment(), 16) else {
-        return  Err(Err::Failure(AccessorParserError {
+        return Err(Err::Failure(AccessorParserError {
             kind: AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::InvalidHexadecimal),
             span: code_point_error_span,
         }));
     };
 
     let Some(ch) = char::from_u32(n) else {
-        return Err(Err::Failure(AccessorParserError{
+        return Err(Err::Failure(AccessorParserError {
             kind: AccessorParserErrorKind::InvalidUnicode(InvalidUnicodeError::InvalidCodePoint),
             span: code_point_error_span,
         }));
